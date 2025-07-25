@@ -67,12 +67,13 @@ def save_sidste_tjek():
 
 def lav_mail_tekst():
     tekst = "📈 Dagens top-anbefalede aktier:\n\n"
-    tickers = hent_us_aktier(100)
+    tickers = hent_us_aktier(300)
     anbefalinger = []
 
     for ticker in tickers:
         data = hent_anbefaling(ticker)
-        if data and data["strongBuy"] >= 5:
+        if data and data["strongBuy"] >= 2:
+            
             anbefalinger.append(data)
 
     anbefalinger.sort(key=lambda x: x["strongBuy"], reverse=True)
