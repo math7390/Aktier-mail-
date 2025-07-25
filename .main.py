@@ -72,6 +72,7 @@ def lav_mail_tekst():
 
     for ticker in tickers:
         data = hent_anbefaling(ticker)
+        print(f"Tjekker {ticker} – anbefaling: {data}")
         if data and data["strongBuy"] >= 2:
             
             anbefalinger.append(data)
