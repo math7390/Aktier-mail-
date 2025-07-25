@@ -4,7 +4,6 @@ import requests
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 
-# Miljøvariabler
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USERNAME = os.getenv("SMTP_USERNAME")
@@ -15,7 +14,6 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 SIDSTE_TJEK_FIL = "sidste_tjek.txt"
 OVERVAAG_AKTIER_FIL = "overvaag_aktier.txt"
 
-# Faste populære tickers
 KENDTE_TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "NVO"]
 
 def hent_anbefaling(ticker):
