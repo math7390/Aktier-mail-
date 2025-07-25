@@ -1,129 +1,133 @@
+import os
+import smtplib
 import yfinance as yf
 import requests
-import smtplib
-from email.mime.text import MIMEText
 from datetime import datetime
+from email.message import EmailMessage
 
-# --- Dine API-nøgler og mail info ---
-FINNHUB_API_KEY = 'd21n6phr01qpst75rt2gd21n6phr01qpst75rt30'  # Din Finnhub nøgle
-NEWSAPI_KEY = 'DIN_NEWSAPI_KEY_HER'  # Din NewsAPI nøgle
-SMTP_USERNAME = 'dinmail@gmail.com'
-SMTP_PASSWORD = 'dit-app-password'
-MODTAGER_EMAIL = 'modtager@mail.dk'
+# Miljøvariabler i Render
+SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+MODTAGER_EMAIL = os.getenv("MODTAGER_EMAIL")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
 
-# --- Aktier opdelt på kontinent med symbol og navn ---
-AKTIER = {
-    'Europa': ['NVO.CO', 'SAP.DE', 'ASML.AS', 'SIE.DE', 'AIR.PA'],
-    'Amerika': ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'],
-    'Asien': ['BABA', 'TCS.NS', '005930.KS', 'INFY.NS', 'JD'],
-    'Afrika': ['MTN.JO', 'NPN.JO', 'SHP.JO', 'CPI.JO', 'SBK.JO']
-}
-
-def hent_aktieinfo(symbol):
-    ticker = yf.Ticker(symbol)
-    info = ticker.info
-    kurs = round(info.get('regularMarketPrice', 0), 2)
-    sektor = info.get('sector', 'Ukendt')
-    land = info.get('country', 'Ukendt')
-    navn = info.get('shortName') or info.get('longName') or symbol
-    beskrivelse = info.get('longBusinessSummary', '')[:200].strip() + '...'
-    return {'symbol': symbol, 'kurs': kurs, 'sektor': sektor, 'land': land, 'navn': navn, 'beskrivelse': beskrivelse}
-
-def hent_analyst_ratings(symbol):
-    url = f'https://finnhub.io/api/v1/stock/recommendation?symbol={symbol}&token={FINNHUB_API_KEY}'
-    res = requests.get(url)
-    if res.status_code != 200:
-        return None
-    data = res.json()
-    if not data:
-        return None
-    # Tag nyeste periode (sidste i listen)
-    nyeste = data[-1]
-    return {
-        'strongBuy': nyeste.get('strongBuy', 0),
-        'buy': nyeste.get('buy', 0),
-        'hold': nyeste.get('hold', 0),
-        'sell': nyeste.get('sell', 0),
-        'strongSell': nyeste.get('strongSell', 0)
-    }
+# Liste over aktier du vil overvåge
+overvagede_aktier = ["AAPL", "MSFT", "TSLA", "NVO", "SHOP"]
 
 def hent_nyheder(symbol):
-    # Søger på firmanavn og symbol for bedre dækning
-    query = symbol
-    url = f'https://newsapi.org/v2/everything?q={query}&language=en&sortBy=publishedAt&pageSize=3&apiKey={NEWSAPI_KEY}'
-    res = requests.get(url)
-    if res.status_code != 200:
-        return []
-    artikler = res.json().get('articles', [])
+    url = (
+        f"https://newsapi.org/v2/everything?"
+        f"q={symbol}&"
+        f"language=en&"
+        f"sortBy=publishedAt&"
+        f"apiKey={NEWSAPI_KEY}"
+    )
+    resp = requests.get(url)
+    data = resp.json()
+
     nyheder = []
-    for a in artikler:
-        titel = a['title']
-        dato = a['publishedAt'][:10]
-        # Enkel sentiment - positiv, neutral eller negativ ud fra keywords (kan udbygges)
-        titel_lower = titel.lower()
-        if any(w in titel_lower for w in ['beat', 'rise', 'gain', 'growth', 'positive', 'record']):
-            sentiment = '🟢 Positiv'
-        elif any(w in titel_lower for w in ['drop', 'fall', 'loss', 'negative', 'decline', 'weak']):
-            sentiment = '🔴 Negativ'
+    if data.get("status") != "ok":
+        return nyheder
+
+    for artikel in data.get("articles", [])[:3]:
+        titel = artikel["title"]
+        dato = artikel["publishedAt"][:10]
+        # Simpel sentiment-analyse på titel
+        title_lower = titel.lower()
+        if any(w in title_lower for w in ["rise", "gain", "beat", "profit", "upgrade", "growth"]):
+            sentiment = "🟢 Positiv"
+        elif any(w in title_lower for w in ["fall", "drop", "loss", "downgrade", "decline", "lawsuit"]):
+            sentiment = "🔴 Negativ"
         else:
-            sentiment = '⚪ Neutral'
-        nyheder.append({'titel': titel, 'dato': dato, 'sentiment': sentiment})
+            sentiment = "⚪ Neutral"
+        nyheder.append(f"• {sentiment} – {titel} ({dato})")
     return nyheder
 
-def formater_aktie_tekst(info, ratings, nyheder):
-    # Emojis for ratings
-    emojis = {
-        'strongBuy': '🟢',
-        'buy': '✅',
-        'hold': '⚪',
-        'sell': '🔻',
-        'strongSell': '🔴'
-    }
-    rating_tekst = ''
-    if ratings:
-        rating_tekst = (f"📊 Anbefalinger: "
-                        f"{emojis['strongBuy']} Strong Buy: {ratings['strongBuy']} | "
-                        f"{emojis['buy']} Buy: {ratings['buy']} | "
-                        f"{emojis['hold']} Hold: {ratings['hold']} | "
-                        f"{emojis['sell']} Sell: {ratings['sell']} | "
-                        f"{emojis['strongSell']} Strong Sell: {ratings['strongSell']}")
-    nyheds_tekst = ""
-    if nyheder:
-        nyheds_tekst += "📰 Nyheder:\n"
-        for n in nyheder:
-            nyheds_tekst += f"• {n['sentiment']} – {n['titel']} ({n['dato']})\n"
-    else:
-        nyheds_tekst += "📰 Ingen relevante nyheder fundet.\n"
-    return (f"🔹 {info['symbol']}: {info['kurs']} USD\n"
-            f"{info['navn']} – {info['sektor']} | {info['land']}\n"
-            f"📃 {info['beskrivelse']}\n"
-            f"{rating_tekst}\n"
-            f"{nyheds_tekst}\n")
+def hent_kurs_aendring_pct(symbol):
+    ticker = yf.Ticker(symbol)
+    hist = ticker.history(period="2d")
+    if len(hist) < 2:
+        return 0
+    close_yesterday = hist['Close'][-2]
+    close_today = hist['Close'][-1]
+    return round((close_today - close_yesterday) / close_yesterday * 100, 2)
 
-def lav_mail_tekst():
+def beregn_anbefaling(pos, neu, neg, kurs_ændring_pct):
+    score = 0
+    score += pos * 2
+    score += neu * 0
+    score -= neg * 2
+    score += kurs_ændring_pct * 5  # Vægt kursændring højere
+    
+    if score > 8:
+        return "🟢 Strong Buy"
+    elif score > 4:
+        return "✅ Buy"
+    elif score > -2:
+        return "⚪ Hold"
+    elif score > -6:
+        return "🔻 Sell"
+    else:
+        return "🔴 Strong Sell"
+
+def lav_mail():
     tekst = f"Dagens aktieanalyse – {datetime.now().strftime('%Y-%m-%d')}\n\n"
-    for kontinent, symbols in AKTIER.items():
-        tekst += f"🌍 {kontinent}\n\n"
-        for sym in symbols:
-            info = hent_aktieinfo(sym)
-            ratings = hent_analyst_ratings(sym)
-            nyheder = hent_nyheder(sym)
-            tekst += formater_aktie_tekst(info, ratings, nyheder)
-            tekst += "\n"
+    tekst += "📈 Overvågede aktier:\n\n"
+
+    for symbol in overvagede_aktier:
+        ticker = yf.Ticker(symbol)
+        info = ticker.info
+        navn = info.get("shortName", "Ukendt navn")
+        kurs = round(info.get("currentPrice", 0), 2)
+        sektor = info.get("sector", "Ukendt sektor")
+        land = info.get("country", "Ukendt land")
+        beskrivelse = info.get("longBusinessSummary", "")
+        if beskrivelse:
+            beskrivelse = beskrivelse[:200].strip() + "..."
+        else:
+            beskrivelse = "Beskrivelse ikke tilgængelig."
+
+        kurs_ændring_pct = hent_kurs_aendring_pct(symbol)
+        nyheder = hent_nyheder(symbol)
+        pos = sum("🟢" in n for n in nyheder)
+        neu = sum("⚪" in n for n in nyheder)
+        neg = sum("🔴" in n for n in nyheder)
+        anbefaling = beregn_anbefaling(pos, neu, neg, kurs_ændring_pct)
+
+        tekst += (
+            f"🔹 {symbol}: {kurs} USD\n"
+            f"{navn} – {sektor} | {land}\n"
+            f"📃 {beskrivelse}\n"
+            f"📊 Kursændring (1 dag): {kurs_ændring_pct}%\n"
+            f"📈 Anbefaling: {anbefaling}\n\n"
+        )
+
+    tekst += "📰 Nyheder for overvågede aktier:\n\n"
+    for symbol in overvagede_aktier:
+        navn = yf.Ticker(symbol).info.get("shortName", symbol)
+        tekst += f"🔍 {symbol} – {navn}\n"
+        nyheder = hent_nyheder(symbol)
+        if nyheder:
+            for nyhed in nyheder:
+                tekst += nyhed + "\n"
+        else:
+            tekst += "Ingen relevante nyheder fundet.\n"
+        tekst += "\n"
+
     return tekst
 
 def send_mail(tekst):
-    message = MIMEText(tekst, _charset='utf-8')
-    message['Subject'] = 'Dagens aktieanalyse'
-    message['From'] = SMTP_USERNAME
-    message['To'] = MODTAGER_EMAIL
+    message = EmailMessage()
+    message["From"] = SMTP_USERNAME
+    message["To"] = MODTAGER_EMAIL
+    message["Subject"] = f"Dagens Aktieanalyse – {datetime.now().strftime('%Y-%m-%d')}"
+    message.set_content(tekst)
 
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-        smtp.sendmail(SMTP_USERNAME, MODTAGER_EMAIL, message.as_string())
+        smtp.send_message(message)
 
 if __name__ == "__main__":
-    mail_tekst = lav_mail_tekst()
-    print(mail_tekst)  # Til debug kan du se output i konsol
+    mail_tekst = lav_mail()
     send_mail(mail_tekst)
     print("Mail sendt.")
