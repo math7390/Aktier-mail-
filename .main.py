@@ -11,8 +11,9 @@ SMTP_PORT = 587
 SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+MODTAGER_EMAIL = os.getenv("MODTAGER_EMAIL")
 
-# Dine egne aktier (du kan tilføje flere)
+# Dine egne aktier (kan ændres frit)
 mine_aktier = ["AAPL", "TSLA", "NOVO-B.CO"]
 
 def hent_anbefalinger(ticker):
@@ -35,7 +36,7 @@ def send_mail(indhold):
     msg = EmailMessage()
     msg["Subject"] = "📬 Dagens aktieanbefalinger"
     msg["From"] = SMTP_USERNAME
-    msg["To"] = os.getenv("MODTAGER_EMAIL")
+    msg["To"] = MODTAGER_EMAIL
     msg.set_content(indhold)
 
     with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as smtp:
@@ -46,18 +47,3 @@ def send_mail(indhold):
 if __name__ == "__main__":
     mail_tekst = lav_daglig_mail()
     send_mail(mail_tekst)
-requests
-python-dotenv
-
-# 📈 Aktieanbefaling Script – Dansk Version
-
-Et dagligt Python-script, som sender dig analytikeranbefalinger for dine valgte aktier via mail (Brevo SMTP).
-
-## 🧰 Krav
-
-- Python 3.10+
-- Brevo SMTP-konto (gratis)
-- Finnhub API-nøgle (gratis)
-- Render.com (til at køre scriptet dagligt)
-
-
