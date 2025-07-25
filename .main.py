@@ -1,108 +1,77 @@
-import smtplib
 import yfinance as yf
 import requests
-from datetime import datetime
-import os
-from email.mime.text import MIMEText
+import smtplib
 from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+import datetime
+import os
 
-# Miljøvariabler
+# === ENVIRONMENT VARIABLER ===
+SMTP_SERVER = "smtp.gmail.com"
+SMTP_PORT = 587
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD")
 MODTAGER_EMAIL = os.environ.get("MODTAGER_EMAIL")
-FINNHUB_API_KEY = os.environ.get("FINNHUB_API_KEY")
-NEWSAPI_KEY = os.environ.get("NEWSAPI_KEY")
+NEWS_API_KEY = os.environ.get("NEWSAPI_KEY")
 
-# Overvågede aktier
-overvågede_aktier = ["AAPL", "NVO", "SHOP"]
+# === AKTIER TIL OVERVÅGNING ===
+overvågede_aktier = ["AAPL", "SHOP", "NVO"]
 
-# Hent info om aktier
-def hent_aktieinfo(symbol):
-    aktie = yf.Ticker(symbol)
-    info = aktie.info
+# === FUNKTION: HENT BESKRIVELSE, KURS OG SEKTOR ===
+def hent_aktiedata(tickers):
+    data = []
+    for symbol in tickers:
+        aktie = yf.Ticker(symbol)
+        info = aktie.info
 
-    try:
-        kurs = round(info.get("currentPrice", 0), 2)
-        navn = info.get("shortName", "Ukendt navn")
-        sektor = info.get("sector", "Ukendt sektor")
-        land = info.get("country", "Ukendt land")
-        beskrivelse = info.get("longBusinessSummary", "Ingen beskrivelse")
-        return {
+        navn = info.get("shortName", "Ukendt")
+        sektor = info.get("sector", "Ukendt")
+        land = info.get("country", "Ukendt")
+        beskrivelse = info.get("longBusinessSummary", "Ingen beskrivelse.")
+        pris = round(info.get("regularMarketPrice", 0), 2)
+
+        data.append({
             "symbol": symbol,
-            "kurs": kurs,
             "navn": navn,
             "sektor": sektor,
             "land": land,
+            "pris": pris,
             "beskrivelse": beskrivelse
-        }
-    except Exception:
-        return None
+        })
+    return data
 
-# Hent anbefalinger fra Finnhub
-def hent_anbefalinger(symbol):
-    url = f"https://finnhub.io/api/v1/stock/recommendation?symbol={symbol}&token={FINNHUB_API_KEY}"
-    try:
-        res = requests.get(url)
-        data = res.json()
-        if isinstance(data, list) and len(data) > 0:
-            seneste = data[0]
-            return {
-                "strongBuy": seneste.get("strongBuy", 0),
-                "buy": seneste.get("buy", 0),
-                "hold": seneste.get("hold", 0),
-                "sell": seneste.get("sell", 0),
-                "strongSell": seneste.get("strongSell", 0),
-            }
-    except Exception:
-        pass
-    return None
-
-# Hent nyheder via NewsAPI
+# === FUNKTION: HENT NYHEDER ===
 def hent_nyheder(symbol):
-    url = f"https://newsapi.org/v2/everything?q={symbol}&apiKey={NEWSAPI_KEY}&language=da&pageSize=5"
-    try:
-        res = requests.get(url)
-        data = res.json()
-        nyheder = []
-        for artikel in data.get("articles", []):
-            titel = artikel.get("title", "Ukendt titel")
-            dato = artikel.get("publishedAt", "")[:10]
-            sentiment = "⚪ Neutral"
-            if any(word in titel.lower() for word in ["stiger", "vinder", "rekord", "løfter", "god", "plus"]):
-                sentiment = "📈 Positiv"
-            elif any(word in titel.lower() for word in ["falder", "skuffelse", "taber", "kritik", "dårlig", "minus"]):
-                sentiment = "📉 Negativ"
-            nyheder.append(f"{sentiment} – {titel} ({dato})")
-        return nyheder if nyheder else ["Ingen relevante nyheder fundet."]
-    except Exception:
-        return ["Fejl ved hentning af nyheder."]
+    url = f"https://newsapi.org/v2/everything?q={symbol}&apiKey={NEWS_API_KEY}&language=en"
+    response = requests.get(url)
+    nyheder = []
+    if response.status_code == 200:
+        data = response.json()
+        for artikel in data.get("articles", [])[:3]:
+            titel = artikel["title"]
+            dato = artikel["publishedAt"][:10]
+            vurdering = "⚪ Neutral"
+            if any(word in titel.lower() for word in ["falls", "drops", "plunge", "lawsuit", "cut"]):
+                vurdering = "🔴 Negativ"
+            elif any(word in titel.lower() for word in ["rises", "beats", "record", "growth"]):
+                vurdering = "🟢 Positiv"
+            nyheder.append(f"{vurdering} – {titel} ({dato})")
+    return nyheder if nyheder else ["Ingen relevante nyheder fundet."]
 
-# Sæt hele mailen sammen
-def byg_mail():
-    linjer = []
-    linjer.append(f"Dagens aktieanalyse – {datetime.now().strftime('%Y-%m-%d')}\n")
+# === FUNKTION: LAV MAILINDHOLD ===
+def lav_mail(aktier, overvågede):
+    linjer = [f"Dagens aktieanalyse – {datetime.date.today()}\n"]
 
     linjer.append("📈 Top anbefalinger:\n")
-    symbols = ["AAPL", "MSFT", "TSLA", "GOOGL", "AMZN", "NVDA", "META", "NVO", "SHOP", "BABA"]
+    for aktie in aktier:
+        linjer.append(f"🔹 {aktie['symbol']}: {aktie['pris']:.2f} USD")
+        linjer.append(f"{aktie['navn']} – {aktie['sektor']} | {aktie['land']}")
+        linjer.append(f"{aktie['beskrivelse'][:200]}...\n")
 
-    for symbol in symbols:
-        aktie = hent_aktieinfo(symbol)
-        anbefaling = hent_anbefalinger(symbol)
-        if aktie:
-            linjer.append(f"{symbol}: Kurs {aktie['kurs']:.2f} USD")
-            linjer.append(f"💼 {aktie['navn']} – {aktie['sektor']} | {aktie['land']}")
-            if anbefaling:
-                linjer.append(
-                    f"📊 Anbefalinger: 🟢 Strong Buy: {anbefaling['strongBuy']} | 🟢 Buy: {anbefaling['buy']} | "
-                    f"🟡 Hold: {anbefaling['hold']} | 🔴 Sell: {anbefaling['sell']} | 🔴 Strong Sell: {anbefaling['strongSell']}"
-                )
-            linjer.append(aktie['beskrivelse'][:300] + "...\n")
-
-    linjer.append("\n📰 Nyheder for overvågede aktier:\n")
-
-    for symbol in overvågede_aktier:
-        aktie = hent_aktieinfo(symbol)
-        linjer.append(f"{symbol} – {aktie['navn'] if aktie else symbol}")
+    linjer.append("📰 Nyheder for overvågede aktier:\n")
+    for symbol in overvågede:
+        navn = yf.Ticker(symbol).info.get("shortName", symbol)
+        linjer.append(f"\n🔍 {symbol} – {navn}")
         nyheder = hent_nyheder(symbol)
         for nyhed in nyheder:
             linjer.append(f"• {nyhed}")
@@ -110,19 +79,23 @@ def byg_mail():
 
     return "\n".join(linjer)
 
-# Send mail via Gmail SMTP med UTF-8
-def send_mail(tekst):
+# === FUNKTION: SEND MAIL ===
+def send_mail(indhold):
     msg = MIMEMultipart()
     msg["From"] = SMTP_USERNAME
     msg["To"] = MODTAGER_EMAIL
-    msg["Subject"] = "Dagens aktieanalyse"
-    msg.attach(MIMEText(tekst, "plain", "utf-8"))
+    msg["Subject"] = "📊 Daglig aktieanalyse og nyheder"
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+    msg.attach(MIMEText(indhold, "plain", "utf-8"))
+
+    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as smtp:
+        smtp.starttls()
         smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
         smtp.send_message(msg)
 
-# Kør script
-mail_tekst = byg_mail()
+# === HOVEDPROGRAM ===
+top_aktier = ["AAPL", "MSFT", "TSLA", "GOOGL", "AMZN", "NVDA", "META", "NVO", "SHOP", "BABA"]
+aktiedata = hent_aktiedata(top_aktier)
+mail_tekst = lav_mail(aktiedata, overvågede_aktier)
 send_mail(mail_tekst)
-print("Mail sendt.")
+print("✅ Mail sendt.")
