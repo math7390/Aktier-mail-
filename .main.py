@@ -4,6 +4,7 @@ import requests
 from email.message import EmailMessage
 from datetime import datetime, timedelta
 
+# Miljøvariabler
 SMTP_SERVER = "smtp.gmail.com"
 SMTP_PORT = 587
 SMTP_USERNAME = os.getenv("SMTP_USERNAME")
@@ -14,13 +15,8 @@ FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 SIDSTE_TJEK_FIL = "sidste_tjek.txt"
 OVERVAAG_AKTIER_FIL = "overvaag_aktier.txt"
 
-def hent_us_aktier(limit=50):
-    url = f"https://finnhub.io/api/v1/stock/symbol?exchange=US&token={FINNHUB_API_KEY}"
-    response = requests.get(url)
-    if response.status_code == 200:
-        symbols = response.json()
-        return [s["symbol"] for s in symbols[:limit]]
-    return []
+# Faste populære tickers
+KENDTE_TICKERS = ["AAPL", "MSFT", "NVDA", "TSLA", "AMZN", "GOOGL", "META", "NFLX", "NVO"]
 
 def hent_anbefaling(ticker):
     url = f"https://finnhub.io/api/v1/stock/recommendation?symbol={ticker}&token={FINNHUB_API_KEY}"
@@ -29,18 +25,18 @@ def hent_anbefaling(ticker):
         data = r.json()[0]
         return {
             "symbol": ticker,
-            "strongBuy": data["strongBuy"],
-            "buy": data["buy"],
-            "hold": data["hold"],
-            "sell": data["sell"],
-            "strongSell": data["strongSell"]
+            "strongBuy": data.get("strongBuy", 0),
+            "buy": data.get("buy", 0),
+            "hold": data.get("hold", 0),
+            "sell": data.get("sell", 0),
+            "strongSell": data.get("strongSell", 0)
         }
     return None
 
 def vurder_nyhed(tekst):
     tekst = tekst.lower()
-    gode = ["stigning", "rekord", "overskud", "forbedret", "vækst", "positiv"]
-    skidt = ["fald", "underskud", "problem", "nedjustering", "tab", "negativ"]
+    gode = ["stigning", "rekord", "overskud", "forbedret", "vækst", "positiv", "partner", "løft", "køb", "investering"]
+    skidt = ["fald", "underskud", "problem", "nedjustering", "tab", "negativ", "bøde", "undersøgelse", "skandale"]
     score = sum(1 for ord in gode if ord in tekst) - sum(1 for ord in skidt if ord in tekst)
     return "Godt" if score > 0 else "Skidt" if score < 0 else "Neutral"
 
@@ -67,26 +63,24 @@ def save_sidste_tjek():
 
 def lav_mail_tekst():
     tekst = "📈 Dagens top-anbefalede aktier:\n\n"
-    tickers = hent_us_aktier(300)
     anbefalinger = []
 
-    for ticker in tickers:
+    for ticker in KENDTE_TICKERS:
         data = hent_anbefaling(ticker)
-        print(f"Tjekker {ticker} – anbefaling: {data}")
-        if data and data["strongBuy"] >= 2:
-            
+        if data:
+            data["score"] = data["strongBuy"] + data["buy"]
             anbefalinger.append(data)
 
-    anbefalinger.sort(key=lambda x: x["strongBuy"], reverse=True)
+    anbefalinger.sort(key=lambda x: x["score"], reverse=True)
     top5 = anbefalinger[:5]
 
     if not top5:
-        tekst += "Ingen stærke anbefalinger i dag.\n"
+        tekst += "Ingen anbefalinger fundet i dag.\n"
     else:
         for aktie in top5:
             tekst += (
                 f"{aktie['symbol']} – Strong Buy: {aktie['strongBuy']}, "
-                f"Buy: {aktie['buy']}, Hold: {aktie['hold']}\n"
+                f"Buy: {aktie['buy']}, Hold: {aktie['hold']}, Sell: {aktie['sell']}\n"
             )
 
     tekst += "\n📰 Nyheder om overvågede aktier:\n\n"
@@ -96,7 +90,8 @@ def lav_mail_tekst():
         if nyheder:
             tekst += f"{aktie}:\n"
             for n in nyheder[:3]:
-                tekst += f"- {n['headline']} (Vurdering: {vurder_nyhed(n['headline'])})\n"
+                vurdering = vurder_nyhed(n['headline'])
+                tekst += f"- {n['headline']} (Vurdering: {vurdering})\n"
             tekst += "\n"
     save_sidste_tjek()
     return tekst
@@ -119,4 +114,4 @@ if __name__ == "__main__":
         send_mail(tekst)
         print("Mail sendt.")
     except Exception as e:
-        print("Fejl
+        print("Fejl:", e)
