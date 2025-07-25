@@ -119,4 +119,4 @@ if __name__ == "__main__":
         send_mail(tekst)
         print("Mail sendt.")
     except Exception as e:
-        print("Fejl:", e)
+        print("Fejl
