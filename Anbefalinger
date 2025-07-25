@@ -60,19 +60,4 @@ Et dagligt Python-script, som sender dig analytikeranbefalinger for dine valgte 
 - Finnhub API-nøgle (gratis)
 - Render.com (til at køre scriptet dagligt)
 
-## ⚙️ Miljøvariabler (.env)
 
-Kopier `.env.example` til `.env` og udfyld dine egne nøgler:
-## 🚀 Kørsel
-
-Installer afhængigheder:
-Kør scriptet manuelt:
-## ☁️ Kør på Render.com
-
-1. Opret repo og upload disse filer
-2. Gå til [Render.com](https://render.com)
-3. Opret en "Cron Job"
-4. Tilføj miljøvariabler fra din `.env` i "Environment Variables"
-5. Kør dagligt med kommandoen `python main.py`
-
-✅ Du vil nu modtage daglige aktieanbefalinger på mail.
