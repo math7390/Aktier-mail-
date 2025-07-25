@@ -3,6 +3,8 @@ import yfinance as yf
 import requests
 from datetime import datetime
 import os
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 # Miljøvariabler
 SMTP_USERNAME = os.environ.get("SMTP_USERNAME")
@@ -66,9 +68,9 @@ def hent_nyheder(symbol):
             titel = artikel.get("title", "Ukendt titel")
             dato = artikel.get("publishedAt", "")[:10]
             sentiment = "⚪ Neutral"
-            if any(word in titel.lower() for word in ["stiger", "vinder", "rekord", "løfter", "god"]):
+            if any(word in titel.lower() for word in ["stiger", "vinder", "rekord", "løfter", "god", "plus"]):
                 sentiment = "📈 Positiv"
-            elif any(word in titel.lower() for word in ["falder", "skuffelse", "taber", "kritik", "dårlig"]):
+            elif any(word in titel.lower() for word in ["falder", "skuffelse", "taber", "kritik", "dårlig", "minus"]):
                 sentiment = "📉 Negativ"
             nyheder.append(f"{sentiment} – {titel} ({dato})")
         return nyheder if nyheder else ["Ingen relevante nyheder fundet."]
@@ -95,6 +97,7 @@ def byg_mail():
                     f"🟡 Hold: {anbefaling['hold']} | 🔴 Sell: {anbefaling['sell']} | 🔴 Strong Sell: {anbefaling['strongSell']}"
                 )
             linjer.append(aktie['beskrivelse'][:300] + "...\n")
+
     linjer.append("\n📰 Nyheder for overvågede aktier:\n")
 
     for symbol in overvågede_aktier:
@@ -107,12 +110,17 @@ def byg_mail():
 
     return "\n".join(linjer)
 
-# Send mail via Gmail SMTP
+# Send mail via Gmail SMTP med UTF-8
 def send_mail(tekst):
+    msg = MIMEMultipart()
+    msg["From"] = SMTP_USERNAME
+    msg["To"] = MODTAGER_EMAIL
+    msg["Subject"] = "Dagens aktieanalyse"
+    msg.attach(MIMEText(tekst, "plain", "utf-8"))
+
     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
         smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-        message = f"Subject: Dagens aktieanalyse\n\n{tekst}"
-        smtp.sendmail(SMTP_USERNAME, MODTAGER_EMAIL, message)
+        smtp.send_message(msg)
 
 # Kør script
 mail_tekst = byg_mail()
