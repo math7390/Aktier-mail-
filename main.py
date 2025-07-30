@@ -1,17 +1,18 @@
 import yfinance as yf
 import requests
-import smtplib
-from email.mime.text import MIMEText
+from mailjet_rest import Client
 from datetime import datetime
+import os
 
-# --- Dine API-nøgler og mail info ---
-FINNHUB_API_KEY = 'd21n6phr01qpst75rt2gd21n6phr01qpst75rt30'  # Din Finnhub nøgle
-NEWSAPI_KEY = 'DIN_NEWSAPI_KEY_HER'  # Din NewsAPI nøgle
-SMTP_USERNAME = 'dinmail@gmail.com'
-SMTP_PASSWORD = 'dit-app-password'
-MODTAGER_EMAIL = 'modtager@mail.dk'
+# --- API-nøgler og mail info (fra miljøvariabler) ---
+FINNHUB_API_KEY = os.environ.get('FINNHUB_API_KEY')
+NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
+MJ_APIKEY_PUBLIC = os.environ.get('MJ_APIKEY_PUBLIC')
+MJ_APIKEY_PRIVATE = os.environ.get('MJ_APIKEY_PRIVATE')
+MODTAGER_EMAIL = os.environ.get('MODTAGER_EMAIL')
+AFSENDER_EMAIL = os.environ.get('AFSENDER_EMAIL')
 
-# --- Aktier opdelt på kontinent med symbol og navn ---
+# --- Aktier opdelt på kontinenter ---
 AKTIER = {
     'Europa': ['NVO.CO', 'SAP.DE', 'ASML.AS', 'SIE.DE', 'AIR.PA'],
     'Amerika': ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'],
@@ -37,7 +38,6 @@ def hent_analyst_ratings(symbol):
     data = res.json()
     if not data:
         return None
-    # Tag nyeste periode (sidste i listen)
     nyeste = data[-1]
     return {
         'strongBuy': nyeste.get('strongBuy', 0),
@@ -48,9 +48,7 @@ def hent_analyst_ratings(symbol):
     }
 
 def hent_nyheder(symbol):
-    # Søger på firmanavn og symbol for bedre dækning
-    query = symbol
-    url = f'https://newsapi.org/v2/everything?q={query}&language=en&sortBy=publishedAt&pageSize=3&apiKey={NEWSAPI_KEY}'
+    url = f'https://newsapi.org/v2/everything?q={symbol}&language=en&sortBy=publishedAt&pageSize=3&apiKey={NEWSAPI_KEY}'
     res = requests.get(url)
     if res.status_code != 200:
         return []
@@ -59,7 +57,6 @@ def hent_nyheder(symbol):
     for a in artikler:
         titel = a['title']
         dato = a['publishedAt'][:10]
-        # Enkel sentiment - positiv, neutral eller negativ ud fra keywords (kan udbygges)
         titel_lower = titel.lower()
         if any(w in titel_lower for w in ['beat', 'rise', 'gain', 'growth', 'positive', 'record']):
             sentiment = '🟢 Positiv'
@@ -71,29 +68,21 @@ def hent_nyheder(symbol):
     return nyheder
 
 def formater_aktie_tekst(info, ratings, nyheder):
-    # Emojis for ratings
-    emojis = {
-        'strongBuy': '🟢',
-        'buy': '✅',
-        'hold': '⚪',
-        'sell': '🔻',
-        'strongSell': '🔴'
-    }
+    emojis = {'strongBuy': '🟢', 'buy': '✅', 'hold': '⚪', 'sell': '🔻', 'strongSell': '🔴'}
     rating_tekst = ''
     if ratings:
         rating_tekst = (f"📊 Anbefalinger: "
-                        f"{emojis['strongBuy']} Strong Buy: {ratings['strongBuy']} | "
-                        f"{emojis['buy']} Buy: {ratings['buy']} | "
-                        f"{emojis['hold']} Hold: {ratings['hold']} | "
-                        f"{emojis['sell']} Sell: {ratings['sell']} | "
-                        f"{emojis['strongSell']} Strong Sell: {ratings['strongSell']}")
-    nyheds_tekst = ""
+                        f"{emojis['strongBuy']} {ratings['strongBuy']} | "
+                        f"{emojis['buy']} {ratings['buy']} | "
+                        f"{emojis['hold']} {ratings['hold']} | "
+                        f"{emojis['sell']} {ratings['sell']} | "
+                        f"{emojis['strongSell']} {ratings['strongSell']}")
+    nyheds_tekst = "📰 Nyheder:\n"
     if nyheder:
-        nyheds_tekst += "📰 Nyheder:\n"
         for n in nyheder:
             nyheds_tekst += f"• {n['sentiment']} – {n['titel']} ({n['dato']})\n"
     else:
-        nyheds_tekst += "📰 Ingen relevante nyheder fundet.\n"
+        nyheds_tekst += "• Ingen relevante nyheder.\n"
     return (f"🔹 {info['symbol']}: {info['kurs']} USD\n"
             f"{info['navn']} – {info['sektor']} | {info['land']}\n"
             f"📃 {info['beskrivelse']}\n"
@@ -112,18 +101,22 @@ def lav_mail_tekst():
             tekst += "\n"
     return tekst
 
-def send_mail(tekst):
-    message = MIMEText(tekst, _charset='utf-8')
-    message['Subject'] = 'Dagens aktieanalyse'
-    message['From'] = SMTP_USERNAME
-    message['To'] = MODTAGER_EMAIL
-
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(SMTP_USERNAME, SMTP_PASSWORD)
-        smtp.sendmail(SMTP_USERNAME, MODTAGER_EMAIL, message.as_string())
+def send_mail(mail_tekst):
+    mailjet = Client(auth=(MJ_APIKEY_PUBLIC, MJ_APIKEY_PRIVATE), version='v3.1')
+    data = {
+        'Messages': [
+            {
+                "From": {"Email": AFSENDER_EMAIL, "Name": "AktieBot"},
+                "To": [{"Email": MODTAGER_EMAIL, "Name": "Modtager"}],
+                "Subject": "Dagens aktieanalyse 📈",
+                "TextPart": mail_tekst
+            }
+        ]
+    }
+    result = mailjet.send.create(data=data)
+    print(result.status_code)
+    print(result.json())
 
 if __name__ == "__main__":
     mail_tekst = lav_mail_tekst()
-    print(mail_tekst)  # Til debug kan du se output i konsol
     send_mail(mail_tekst)
-    print("Mail sendt.")
