@@ -12,6 +12,9 @@ MJ_APIKEY_PRIVATE = os.environ.get('MJ_APIKEY_PRIVATE')
 MODTAGER_EMAIL = os.environ.get('MODTAGER_EMAIL')
 AFSENDER_EMAIL = os.environ.get('AFSENDER_EMAIL')
 
+# Liste over aktier du vil overvåge
+overvagede_aktier = ["AAPL", "MSFT", "TSLA", "NVO", "SHOP"]
+
 # --- Aktier opdelt på kontinenter ---
 AKTIER = {
     'Europa': ['NVO.CO', 'SAP.DE', 'ASML.AS', 'SIE.DE', 'AIR.PA'],
