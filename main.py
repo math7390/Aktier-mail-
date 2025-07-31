@@ -1,27 +1,27 @@
 import yfinance as yf
 import requests
-from mailjet_rest import Client
 from datetime import datetime
+from mailjet_rest import Client
+
 import os
 
-# --- API-nøgler og mail info (fra miljøvariabler) ---
-FINNHUB_API_KEY = os.environ.get('FINNHUB_API_KEY')
-NEWSAPI_KEY = os.environ.get('NEWSAPI_KEY')
-MJ_APIKEY_PUBLIC = os.environ.get('MJ_APIKEY_PUBLIC')
-MJ_APIKEY_PRIVATE = os.environ.get('MJ_APIKEY_PRIVATE')
-MODTAGER_EMAIL = os.environ.get('MODTAGER_EMAIL')
-AFSENDER_EMAIL = os.environ.get('AFSENDER_EMAIL')
+# === Miljøvariabler ===
+FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
+NEWSAPI_KEY = os.getenv("NEWSAPI_KEY")
+MJ_API_KEY = os.getenv("MJ_API_KEY")
+MJ_API_SECRET = os.getenv("MJ_API_SECRET")
+MODTAGER_EMAIL = os.getenv("MODTAGER_EMAIL")
+AFSENDER_EMAIL = os.getenv("AFSENDER_EMAIL")
 
-# Liste over aktier du vil overvåge
-overvagede_aktier = ["AAPL", "MSFT", "TSLA", "NVO", "SHOP"]
-
-# --- Aktier opdelt på kontinenter ---
+# === Aktier opdelt på kontinent ===
 AKTIER = {
     'Europa': ['NVO.CO', 'SAP.DE', 'ASML.AS', 'SIE.DE', 'AIR.PA'],
     'Amerika': ['AAPL', 'MSFT', 'TSLA', 'GOOGL', 'AMZN'],
-    'Asien': ['BABA', 'TCS.NS', '005930.KS', 'INFY.NS', 'JD'],
-    'Afrika': ['MTN.JO', 'NPN.JO', 'SHP.JO', 'CPI.JO', 'SBK.JO']
+    'Asien': ['BABA', 'TCS.NS', '005930.KS', 'INFY.NS', 'JD']
 }
+
+# === Overvågede aktier (vises i separat sektion) ===
+OVERVÅGNING = ['AAPL', 'SHOP', 'NVO']
 
 def hent_aktieinfo(symbol):
     ticker = yf.Ticker(symbol)
@@ -36,12 +36,9 @@ def hent_aktieinfo(symbol):
 def hent_analyst_ratings(symbol):
     url = f'https://finnhub.io/api/v1/stock/recommendation?symbol={symbol}&token={FINNHUB_API_KEY}'
     res = requests.get(url)
-    if res.status_code != 200:
+    if res.status_code != 200 or not res.json():
         return None
-    data = res.json()
-    if not data:
-        return None
-    nyeste = data[-1]
+    nyeste = res.json()[-1]
     return {
         'strongBuy': nyeste.get('strongBuy', 0),
         'buy': nyeste.get('buy', 0),
@@ -71,21 +68,26 @@ def hent_nyheder(symbol):
     return nyheder
 
 def formater_aktie_tekst(info, ratings, nyheder):
-    emojis = {'strongBuy': '🟢', 'buy': '✅', 'hold': '⚪', 'sell': '🔻', 'strongSell': '🔴'}
-    rating_tekst = ''
+    emojis = {
+        'strongBuy': '🟢',
+        'buy': '✅',
+        'hold': '⚪',
+        'sell': '🔻',
+        'strongSell': '🔴'
+    }
+    rating_tekst = ""
     if ratings:
-        rating_tekst = (f"📊 Anbefalinger: "
-                        f"{emojis['strongBuy']} {ratings['strongBuy']} | "
-                        f"{emojis['buy']} {ratings['buy']} | "
-                        f"{emojis['hold']} {ratings['hold']} | "
-                        f"{emojis['sell']} {ratings['sell']} | "
-                        f"{emojis['strongSell']} {ratings['strongSell']}")
-    nyheds_tekst = "📰 Nyheder:\n"
+        rating_tekst = (f"📊 Anbefalinger: {emojis['strongBuy']} {ratings['strongBuy']} | "
+                        f"{emojis['buy']} {ratings['buy']} | {emojis['hold']} {ratings['hold']} | "
+                        f"{emojis['sell']} {ratings['sell']} | {emojis['strongSell']} {ratings['strongSell']}")
+    nyheds_tekst = ""
     if nyheder:
+        nyheds_tekst += "📰 Nyheder:\n"
         for n in nyheder:
             nyheds_tekst += f"• {n['sentiment']} – {n['titel']} ({n['dato']})\n"
     else:
-        nyheds_tekst += "• Ingen relevante nyheder.\n"
+        nyheds_tekst = "📰 Ingen relevante nyheder fundet.\n"
+
     return (f"🔹 {info['symbol']}: {info['kurs']} USD\n"
             f"{info['navn']} – {info['sektor']} | {info['land']}\n"
             f"📃 {info['beskrivelse']}\n"
@@ -94,25 +96,43 @@ def formater_aktie_tekst(info, ratings, nyheder):
 
 def lav_mail_tekst():
     tekst = f"Dagens aktieanalyse – {datetime.now().strftime('%Y-%m-%d')}\n\n"
+
     for kontinent, symbols in AKTIER.items():
         tekst += f"🌍 {kontinent}\n\n"
-        for sym in symbols:
-            info = hent_aktieinfo(sym)
-            ratings = hent_analyst_ratings(sym)
-            nyheder = hent_nyheder(sym)
+        for symbol in symbols:
+            info = hent_aktieinfo(symbol)
+            ratings = hent_analyst_ratings(symbol)
+            nyheder = hent_nyheder(symbol)
             tekst += formater_aktie_tekst(info, ratings, nyheder)
             tekst += "\n"
+
+    tekst += "🔍 Overvågede aktier:\n\n"
+    for symbol in OVERVÅGNING:
+        info = hent_aktieinfo(symbol)
+        ratings = hent_analyst_ratings(symbol)
+        nyheder = hent_nyheder(symbol)
+        tekst += formater_aktie_tekst(info, ratings, nyheder)
+        tekst += "\n"
+
     return tekst
 
-def send_mail(mail_tekst):
-    mailjet = Client(auth=(MJ_APIKEY_PUBLIC, MJ_APIKEY_PRIVATE), version='v3.1')
+def send_mail(tekst):
+    mailjet = Client(auth=(MJ_API_KEY, MJ_API_SECRET), version='v3.1')
     data = {
         'Messages': [
             {
-                "From": {"Email": AFSENDER_EMAIL, "Name": "AktieBot"},
-                "To": [{"Email": MODTAGER_EMAIL, "Name": "Modtager"}],
-                "Subject": "Dagens aktieanalyse 📈",
-                "TextPart": mail_tekst
+                "From": {
+                    "Email": AFSENDER_EMAIL,
+                    "Name": "AktieBot"
+                },
+                "To": [
+                    {
+                        "Email": MODTAGER_EMAIL,
+                        "Name": "Modtager"
+                    }
+                ],
+                "Subject": "📈 Dagens aktieanalyse",
+                "TextPart": tekst
             }
         ]
     }
